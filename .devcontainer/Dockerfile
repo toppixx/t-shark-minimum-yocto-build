@@ -17,10 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     nano \
     vim \
+    file \
     # Node.js (needed for Claude Code)
     nodejs \
     npm \
-    # Build tools
+    # Core C/C++ build toolchain (gcc, g++, make, binutils, ar, nm, strip, readelf …)
     build-essential \
     cmake \
     ninja-build \
@@ -28,7 +29,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     flex \
     bison \
     python3 \
-    # tshark dependencies
+    perl \
+    # Autotools — required by setup.sh to bootstrap libffi, libgpg-error, libgcrypt
+    m4 \
+    autoconf \
+    automake \
+    libtool \
+    gettext \
+    # aarch64 cross-compiler triplet — installed by setup.sh; redundant on an
+    # aarch64 host but kept here so setup.sh's apt-get step is a no-op in CI.
+    gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu \
+    binutils-aarch64-linux-gnu \
+    # musl libc — used for musl-gcc wrapper experiments during the build
+    musl \
+    musl-dev \
+    musl-tools \
+    # tshark / Wireshark system libraries
     libglib2.0-dev \
     libpcap-dev \
     libgcrypt-dev \
