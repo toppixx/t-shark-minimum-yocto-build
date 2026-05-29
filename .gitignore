@@ -32,6 +32,10 @@
 /toolchain/aarch64-musl-c++
 /toolchain/aarch64-musl.cmake
 
+# Build output copied into workspace for local inspection
+/tshark
+/tshark.sha256
+
 # OS / editor noise
 .DS_Store
 
