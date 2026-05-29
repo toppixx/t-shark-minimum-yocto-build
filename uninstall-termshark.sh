@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-FileCopyrightText: 2026 Tobias Faller
+# SPDX-FileCopyrightText: 2026 toppixx
 # SPDX-License-Identifier: Apache-2.0
 #
 # uninstall-termshark.sh — remove tshark + dumpcap + termshark from a target

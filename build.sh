@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 Tobias Faller
+# SPDX-FileCopyrightText: 2026 toppixx
 # SPDX-License-Identifier: Apache-2.0
 #
 # build.sh — Configure and build TShark from an already-prepared workspace.
