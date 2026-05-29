@@ -19,6 +19,57 @@ OUTPUT=/build/output            # final artefact destination
 MESON="python3 $WS/toolchain/meson/meson.py"
 
 # ---------------------------------------------------------------------------
+# package_output <binary_dir> <version> <pkg_dest>
+#
+# Creates a self-contained tar.gz with tshark + dumpcap + deployment docs.
+# tshark is fully static — NO shared libraries, NO extra data files needed.
+# Both binaries must stay in the same directory: tshark finds dumpcap by
+# reading /proc/self/exe to discover its own path, then looking alongside.
+#   binary_dir  — where stripped tshark/dumpcap binaries live (/build/output)
+#   version     — version string embedded in the archive name
+#   pkg_dest    — directory where the .tar.gz is written (/workspace/out)
+# ---------------------------------------------------------------------------
+package_output() {
+    local outdir="$1" version="$2" pkg_dest="${3:-$1}"
+    local pkgname="tshark-aarch64-${version}-static"
+    local pkgdir="${outdir}/${pkgname}"
+    local archive="${pkg_dest}/${pkgname}.tar.gz"
+    mkdir -p "$pkg_dest"
+
+    echo ">>> Creating deployment package: $(basename "$archive")"
+    rm -rf "$pkgdir"
+    mkdir -p "$pkgdir"
+
+    # Binaries
+    cp "$outdir/tshark"   "$pkgdir/tshark"
+    cp "$outdir/dumpcap"  "$pkgdir/dumpcap"
+    chmod 755 "$pkgdir/tshark" "$pkgdir/dumpcap"
+
+    # Checksums and build metadata
+    cp "$outdir/tshark.sha256"   "$pkgdir/"
+    cp "$outdir/dumpcap.sha256"  "$pkgdir/"
+    cp "$outdir/BUILD_INFO.txt"  "$pkgdir/"
+
+    # Deployment guide — sourced from README.md tracked in the repo
+    local readme="$WS/README.md"
+    if [ -f "$readme" ]; then
+        cp "$readme" "$pkgdir/README.md"
+    else
+        echo "WARNING: $readme not found — package will not include README.md" >&2
+    fi
+
+    # Pack
+    tar -czf "$archive" -C "$outdir" "$pkgname"
+    rm -rf "$pkgdir"
+
+    local size
+    size=$(du -sh "$archive" | cut -f1)
+    sha256sum "$archive" | tee "${archive%.tar.gz}.sha256" > /dev/null
+    echo "    Package : $archive ($size)"
+    echo "    SHA256  : $(awk '{print $1}' "${archive%.tar.gz}.sha256")"
+}
+
+# ---------------------------------------------------------------------------
 # Phase 0 — Prerequisites & Directory Layout
 # ---------------------------------------------------------------------------
 echo ">>> Phase 0: prerequisites"
@@ -424,6 +475,52 @@ fi
 echo "    libbrotlidec.a + libbrotlicommon.a: OK"
 
 # ---------------------------------------------------------------------------
+# Copy system libnl static libraries into DEPINST
+#
+# dumpcap uses libnl-route for network interface enumeration.
+# CMake searches CMAKE_PREFIX_PATH (DEPINST) before system paths, so placing
+# the .a files there prevents the linker falling back to the system .so files
+# when building with -static.
+# The static files come from libnl-3-dev / libnl-genl-3-dev / libnl-route-3-dev
+# which are pre-installed in the Dockerfile.
+# ---------------------------------------------------------------------------
+echo ">>> Copy libnl static libs to DEPINST"
+for lib in libnl-3 libnl-genl-3 libnl-route-3; do
+    src="/usr/lib/aarch64-linux-gnu/${lib}.a"
+    [ -f "$src" ] || { echo "ERROR: $src not found — is ${lib}-dev installed?" >&2; exit 1; }
+    cp "$src" "$DEPINST/lib/"
+    echo "    ${lib}.a: OK"
+done
+
+# Create DEPINST-local pkgconfig files so cmake pkg_check_modules finds the
+# static versions without following the system .pc file's libdir (which points
+# to .so files).
+NL_INC="/usr/include/libnl3"
+for pc_name in libnl-3.0 libnl-genl-3.0 libnl-route-3.0; do
+    # Derive lib name: libnl-3.0 → nl-3, libnl-genl-3.0 → nl-genl-3, etc.
+    lib_flag="-l${pc_name/libnl-/nl-}"
+    lib_flag="${lib_flag/.0/}"            # strip trailing .0
+    src_pc="/usr/lib/aarch64-linux-gnu/pkgconfig/${pc_name}.pc"
+    requires=""
+    [ "$pc_name" = "libnl-genl-3.0" ] && requires="Requires: libnl-3.0"
+    [ "$pc_name" = "libnl-route-3.0" ] && requires="Requires: libnl-3.0"
+    version=$(grep "^Version:" "$src_pc" | awk '{print $2}')
+    cat > "$DEPINST/lib/pkgconfig/${pc_name}.pc" << PCEOF
+prefix=${DEPINST}
+libdir=\${prefix}/lib
+includedir=${NL_INC}
+
+Name: ${pc_name}
+Description: Netlink library
+Version: ${version}
+${requires}
+Libs: -L\${libdir} ${lib_flag}
+Cflags: -I\${includedir}
+PCEOF
+    echo "    ${pc_name}.pc: OK"
+done
+
+# ---------------------------------------------------------------------------
 # Phase 3 — Combined static archive
 #
 # GNU ld resolves archives left-to-right and discards unreferenced symbols.
@@ -611,7 +708,7 @@ cmake -G Ninja \
     -DBUILD_wireshark=OFF \
     -DBUILD_tshark=ON \
     -DBUILD_rawshark=OFF \
-    -DBUILD_dumpcap=OFF \
+    -DBUILD_dumpcap=ON \
     -DBUILD_editcap=OFF \
     -DBUILD_mergecap=OFF \
     -DBUILD_reordercap=OFF \
@@ -653,34 +750,38 @@ cmake -G Ninja \
     "-DCMAKE_EXE_LINKER_FLAGS=-static -L${DEPINST}/lib"
 
 # ---------------------------------------------------------------------------
-# Phase 8 — Build tshark
+# Phase 8 — Build tshark + dumpcap
 # ---------------------------------------------------------------------------
-echo ">>> Build tshark"
-cmake --build "$WS/build" --target tshark -j"$(nproc)"
+echo ">>> Build tshark + dumpcap"
+cmake --build "$WS/build" --target tshark --target dumpcap -j"$(nproc)"
 
 # ---------------------------------------------------------------------------
 # Phase 9 — Verify & copy to output
 # ---------------------------------------------------------------------------
 echo ">>> Verify"
-TSHARK_BIN=$(find "$WS/build" -name tshark -type f | head -1)
+TSHARK_BIN=$(find "$WS/build" -name tshark  -type f | head -1)
+DUMPCAP_BIN=$(find "$WS/build" -name dumpcap -type f | head -1)
 
 file "$TSHARK_BIN"
 readelf -d "$TSHARK_BIN" | grep NEEDED \
     && { echo "ERROR: binary has shared library dependencies"; exit 1; } \
     || echo "PASS: statically linked"
 
-# grep -q exits on first match; with set -o pipefail nm's resulting SIGPIPE
-# (exit 141) would propagate as a failure even though grep succeeded.
-# Wrapping nm in { || true; } absorbs the SIGPIPE exit code.
-{ nm "$TSHARK_BIN" || true; } | grep -q "proto_register_ecat" \
+nm "$TSHARK_BIN" 2>/dev/null | grep "proto_register_ecat" > /dev/null \
     && echo "PASS: EtherCAT dissector symbols present" \
-    || { echo "ERROR: EtherCAT symbols missing"; exit 1; }
+    || { echo "ERROR: EtherCAT symbols missing from tshark binary"; exit 1; }
 
 "$TSHARK_BIN" --version 2>&1 | head -1
 
+[ -n "$DUMPCAP_BIN" ] \
+    && echo "PASS: dumpcap found at $DUMPCAP_BIN" \
+    || { echo "ERROR: dumpcap binary not found after build"; exit 1; }
+
 echo ">>> Strip and copy to $OUTPUT"
-strip --strip-all "$TSHARK_BIN" -o "$OUTPUT/tshark"
-sha256sum "$OUTPUT/tshark" | tee "$OUTPUT/tshark.sha256"
+strip --strip-all "$TSHARK_BIN"  -o "$OUTPUT/tshark"
+strip --strip-all "$DUMPCAP_BIN" -o "$OUTPUT/dumpcap"
+sha256sum "$OUTPUT/tshark"   | tee "$OUTPUT/tshark.sha256"
+sha256sum "$OUTPUT/dumpcap"  | tee "$OUTPUT/dumpcap.sha256"
 
 cat > "$OUTPUT/BUILD_INFO.txt" << BEOF
 Wireshark version: ${WIRESHARK_VERSION}
@@ -690,8 +791,17 @@ Linking: fully static (glibc; no runtime .so dependencies)
 EtherCAT dissectors: built-in (packet-ethercat-frame, packet-ethercat-datagram,
                                 packet-ecatmb, packet-ams, packet-esl,
                                 packet-ioraw, packet-nv)
-Binary size (stripped): $(du -sh "$OUTPUT/tshark" | cut -f1)
-SHA256: $(awk '{print $1}' "$OUTPUT/tshark.sha256")
+Binaries: tshark, dumpcap (tshark spawns dumpcap for live capture)
+tshark size (stripped): $(du -sh "$OUTPUT/tshark"   | cut -f1)
+dumpcap size (stripped): $(du -sh "$OUTPUT/dumpcap" | cut -f1)
+tshark SHA256:  $(awk '{print $1}' "$OUTPUT/tshark.sha256")
+dumpcap SHA256: $(awk '{print $1}' "$OUTPUT/dumpcap.sha256")
+
+Deployment note:
+  Place tshark and dumpcap in the same directory on the target.
+  dumpcap requires CAP_NET_RAW + CAP_NET_ADMIN to capture without root:
+    setcap cap_net_raw,cap_net_admin+eip /path/to/dumpcap
+  Alternatively, run tshark as root on the embedded target.
 
 Note on static glibc vs musl:
   Debian bookworm's musl-tools compiles libstdc++ for glibc, making C++
@@ -700,6 +810,8 @@ Note on static glibc vs musl:
   glibc binary carries the entire C runtime internally and runs on any
   Linux aarch64 kernel, including musl-based Yocto rootfs images.
 BEOF
+
+package_output "$OUTPUT" "$WIRESHARK_VERSION" "$WS/out"
 
 echo ""
 echo "================================================================"

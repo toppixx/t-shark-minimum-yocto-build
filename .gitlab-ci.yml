@@ -140,6 +140,8 @@ build-tshark:
     - mkdir -p artifacts
     - cp /build/output/tshark          artifacts/tshark
     - cp /build/output/tshark.sha256   artifacts/tshark.sha256
+    - cp /build/output/dumpcap         artifacts/dumpcap
+    - cp /build/output/dumpcap.sha256  artifacts/dumpcap.sha256
     - cp /build/output/BUILD_INFO.txt  artifacts/BUILD_INFO.txt
     - |
       echo "=== Artefact summary ==="
@@ -165,6 +167,8 @@ build-tshark:
     paths:
       - artifacts/tshark
       - artifacts/tshark.sha256
+      - artifacts/dumpcap
+      - artifacts/dumpcap.sha256
       - artifacts/BUILD_INFO.txt
     expire_in: $ARTIFACT_EXPIRE
     when: on_success

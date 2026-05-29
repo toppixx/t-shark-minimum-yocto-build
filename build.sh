@@ -40,13 +40,53 @@ OUTPUT=/build/output
 BUILD_DIR=$WS/build
 CACHE_FILE=$WS/toolchain/wireshark-cache.cmake
 ENV_FILE=$WS/toolchain/env.sh
+WIRESHARK_VERSION="v4.2.14"
+
+fail() { echo "ERROR: $*" >&2 ; exit 1; }
+
+# ---------------------------------------------------------------------------
+# package_output <binary_dir> <version> <pkg_dest>  (shared with setup.sh)
+# ---------------------------------------------------------------------------
+package_output() {
+    local outdir="$1" version="$2" pkg_dest="${3:-$1}"
+    local pkgname="tshark-aarch64-${version}-static"
+    local pkgdir="${outdir}/${pkgname}"
+    local archive="${pkg_dest}/${pkgname}.tar.gz"
+    mkdir -p "$pkg_dest"
+
+    echo ">>> Creating deployment package: $(basename "$archive")"
+    rm -rf "$pkgdir"
+    mkdir -p "$pkgdir"
+
+    cp "$outdir/tshark"   "$pkgdir/tshark"
+    cp "$outdir/dumpcap"  "$pkgdir/dumpcap"
+    chmod 755 "$pkgdir/tshark" "$pkgdir/dumpcap"
+    cp "$outdir/tshark.sha256"   "$pkgdir/"
+    cp "$outdir/dumpcap.sha256"  "$pkgdir/"
+    cp "$outdir/BUILD_INFO.txt"  "$pkgdir/"
+
+    # Deployment guide — sourced from README.md tracked in the repo
+    local readme="/workspace/README.md"
+    if [ -f "$readme" ]; then
+        cp "$readme" "$pkgdir/README.md"
+    else
+        echo "WARNING: $readme not found — package will not include README.md" >&2
+    fi
+
+    tar -czf "$archive" -C "$outdir" "$pkgname"
+    rm -rf "$pkgdir"
+
+    local size
+    size=$(du -sh "$archive" | cut -f1)
+    sha256sum "$archive" | tee "${archive%.tar.gz}.sha256" > /dev/null
+    echo "    Package : $archive ($size)"
+    echo "    SHA256  : $(awk '{print $1}' "${archive%.tar.gz}.sha256")"
+}
 
 # ---------------------------------------------------------------------------
 # Preflight checks
 # ---------------------------------------------------------------------------
 echo ">>> Preflight checks"
-
-fail() { echo "ERROR: $*" >&2 ; exit 1; }
 
 [ -f "$ENV_FILE" ]            || fail "env.sh not found — run setup.sh first"
 [ -d "$WS/wireshark" ]        || fail "Wireshark source not found — run setup.sh first"
@@ -99,6 +139,7 @@ REQUIRED_LIBS=(
     libpcap.a libcares.a
     liblz4.a libzstd.a
     libbrotlidec.a libbrotlicommon.a
+    libnl-3.a libnl-genl-3.a libnl-route-3.a
 )
 MISSING=()
 for lib in "${REQUIRED_LIBS[@]}"; do
@@ -107,6 +148,18 @@ done
 if [[ ${#MISSING[@]} -gt 0 ]]; then
     fail "Missing static libs: ${MISSING[*]} — run setup.sh first"
 fi
+
+# Ensure libnl static libs are in DEPINST (may be missing if setup.sh
+# predates this fix — copy them on-the-fly rather than failing the build).
+for lib in libnl-3 libnl-genl-3 libnl-route-3; do
+    dest="$DEPINST/lib/${lib}.a"
+    src="/usr/lib/aarch64-linux-gnu/${lib}.a"
+    if [[ ! -f "$dest" ]]; then
+        [[ -f "$src" ]] || fail "$src not found — is ${lib}-dev installed?"
+        cp "$src" "$dest"
+        echo "    Copied ${lib}.a to DEPINST"
+    fi
+done
 
 echo "    All deps present."
 
@@ -184,7 +237,7 @@ if [[ ! -f "$BUILD_DIR/build.ninja" ]]; then
         -DBUILD_wireshark=OFF \
         -DBUILD_tshark=ON \
         -DBUILD_rawshark=OFF \
-        -DBUILD_dumpcap=OFF \
+        -DBUILD_dumpcap=ON \
         -DBUILD_editcap=OFF \
         -DBUILD_mergecap=OFF \
         -DBUILD_reordercap=OFF \
@@ -231,9 +284,9 @@ fi
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
-echo ">>> Build tshark  (jobs: $JOBS)"
+echo ">>> Build tshark + dumpcap  (jobs: $JOBS)"
 BUILD_START=$(date +%s)
-cmake --build "$BUILD_DIR" --target tshark -j"$JOBS"
+cmake --build "$BUILD_DIR" --target tshark --target dumpcap -j"$JOBS"
 BUILD_END=$(date +%s)
 echo "    Build time: $((BUILD_END - BUILD_START))s"
 
@@ -241,8 +294,17 @@ echo "    Build time: $((BUILD_END - BUILD_START))s"
 # Verify
 # ---------------------------------------------------------------------------
 echo ">>> Verify"
-TSHARK_BIN=$(find "$BUILD_DIR" -name tshark -type f | head -1)
-[ -n "$TSHARK_BIN" ] || fail "tshark binary not found after build"
+TSHARK_BIN=$(find "$BUILD_DIR"  -name tshark   -type f | head -1)
+DUMPCAP_BIN=$(find "$BUILD_DIR" -name dumpcap  -type f | head -1)
+
+[ -n "$TSHARK_BIN" ]  || fail "tshark binary not found after build"
+[ -n "$DUMPCAP_BIN" ] || fail "dumpcap binary not found after build"
+
+# tshark finds dumpcap via /proc/self/exe — both binaries must be co-located.
+TSHARK_DIR=$(dirname "$TSHARK_BIN")
+DUMPCAP_DIR=$(dirname "$DUMPCAP_BIN")
+[ "$TSHARK_DIR" = "$DUMPCAP_DIR" ] \
+    || fail "tshark ($TSHARK_DIR) and dumpcap ($DUMPCAP_DIR) are in different directories — they must be co-located"
 
 file "$TSHARK_BIN"
 
@@ -250,23 +312,33 @@ readelf -d "$TSHARK_BIN" | grep -q NEEDED \
     && fail "binary has shared library dependencies — not fully static" \
     || echo "    PASS: statically linked"
 
-nm "$TSHARK_BIN" | grep -q "proto_register_ecat" \
+# grep without -q reads all nm output before exiting, preventing SIGPIPE on nm.
+# With set -euo pipefail, SIGPIPE causes nm to exit 141 which pipefail
+# returns as the pipeline exit code — a false failure even when the symbol exists.
+nm "$TSHARK_BIN" 2>/dev/null | grep "proto_register_ecat" > /dev/null \
     && echo "    PASS: EtherCAT dissector symbols present" \
     || fail "EtherCAT symbols missing from binary"
 
 "$TSHARK_BIN" --version 2>&1 | head -1
+echo "    PASS: dumpcap at $DUMPCAP_BIN"
 
 # ---------------------------------------------------------------------------
 # Copy to output
 # ---------------------------------------------------------------------------
 echo ">>> Strip and copy to $OUTPUT"
 mkdir -p "$OUTPUT"
-strip --strip-all "$TSHARK_BIN" -o "$OUTPUT/tshark"
-sha256sum "$OUTPUT/tshark" | tee "$OUTPUT/tshark.sha256"
-du -sh "$OUTPUT/tshark"
+strip --strip-all "$TSHARK_BIN"  -o "$OUTPUT/tshark"
+strip --strip-all "$DUMPCAP_BIN" -o "$OUTPUT/dumpcap"
+sha256sum "$OUTPUT/tshark"   | tee "$OUTPUT/tshark.sha256"
+sha256sum "$OUTPUT/dumpcap"  | tee "$OUTPUT/dumpcap.sha256"
+du -sh "$OUTPUT/tshark" "$OUTPUT/dumpcap"
+
+package_output "$OUTPUT" "$WIRESHARK_VERSION" "$WS/out"
 
 echo ""
 echo "================================================================"
-echo "  $OUTPUT/tshark"
-echo "  $(du -sh "$OUTPUT/tshark" | cut -f1)   aarch64   statically linked   EtherCAT built-in"
+echo "  $OUTPUT/tshark   $(du -sh "$OUTPUT/tshark"   | cut -f1)"
+echo "  $OUTPUT/dumpcap  $(du -sh "$OUTPUT/dumpcap"  | cut -f1)"
+echo "  Package: $WS/out/tshark-aarch64-${WIRESHARK_VERSION}-static.tar.gz"
+echo "  aarch64   statically linked   EtherCAT built-in"
 echo "================================================================"
