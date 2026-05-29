@@ -28,14 +28,42 @@ that is on `$PATH`** (e.g. `/usr/bin`).
 
 ## Installation
 
+### Recommended — use the bundled installer
+
+The package includes `setup-termshark.sh`, which installs all three binaries
+into a directory on `PATH`, sets permissions, grants `dumpcap` capture
+capabilities (if `setcap` is available), and adds the directory to `PATH`.
+It is POSIX `sh` and works under busybox on a minimal Yocto rootfs.
+
 ```sh
-# Extract all three binaries into a directory on PATH
-tar -xzf tshark-aarch64-*-termshark-*-static.tar.gz -C /usr/bin/ --strip-components=1
-chmod +x /usr/bin/termshark /usr/bin/tshark /usr/bin/dumpcap
+tar -xzf tshark-aarch64-*-termshark-*-static.tar.gz
+cd tshark-aarch64-*-termshark-*-static
+
+# Install to /usr/local/bin (default)
+sudo ./setup-termshark.sh
+
+# …or install to /usr/bin
+sudo ./setup-termshark.sh --prefix /usr
 
 # Verify
 termshark --help | head -1      # -> termshark v2.4.0
 tshark --version | head -1      # -> TShark (Wireshark) 4.2.14
+```
+
+To remove everything later:
+
+```sh
+sudo ./uninstall-termshark.sh                # if installed with defaults
+sudo ./uninstall-termshark.sh --prefix /usr  # if installed with --prefix /usr
+```
+
+### Manual installation
+
+```sh
+# Extract all three binaries into a directory on PATH
+tar -xzf tshark-aarch64-*-termshark-*-static.tar.gz --strip-components=1 \
+    -C /usr/bin/ tshark dumpcap termshark
+chmod +x /usr/bin/termshark /usr/bin/tshark /usr/bin/dumpcap
 ```
 
 If you keep the binaries in a non-PATH directory, point termshark at tshark

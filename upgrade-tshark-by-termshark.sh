@@ -194,6 +194,16 @@ cp "$BINARY_DIR/BUILD_INFO.txt"   "$PKGDIR/"
 [ -f "$WS/README.md" ]    && cp "$WS/README.md"    "$PKGDIR/README.md"    || true
 [ -f "$WS/TERMSHARK.md" ] && cp "$WS/TERMSHARK.md" "$PKGDIR/TERMSHARK.md" || true
 
+# Install / uninstall helper scripts (run on the target)
+for helper in setup-termshark.sh uninstall-termshark.sh; do
+    if [ -f "$WS/$helper" ]; then
+        cp "$WS/$helper" "$PKGDIR/$helper"
+        chmod 755 "$PKGDIR/$helper"
+    else
+        echo "WARNING: $WS/$helper not found — package will not include it" >&2
+    fi
+done
+
 # Append termshark section to BUILD_INFO
 cat >> "$PKGDIR/BUILD_INFO.txt" << BEOF
 
@@ -222,6 +232,9 @@ echo "  Package   : $ARCHIVE ($ARCHIVE_SIZE)"
 echo "================================================================"
 echo ""
 echo "Deploy on target:"
-echo "  tar -xzf $(basename "$ARCHIVE") -C /usr/bin/ --strip-components=1"
+echo "  tar -xzf $(basename "$ARCHIVE")"
+echo "  cd ${PKGNAME}"
+echo "  sudo ./setup-termshark.sh         # installs to /usr/local/bin + PATH"
 echo "  termshark -i eth0                 # live TUI capture"
 echo "  termshark -r capture.pcap         # offline TUI analysis"
+echo "  sudo ./uninstall-termshark.sh     # remove later"
