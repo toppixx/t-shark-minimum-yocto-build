@@ -12,6 +12,7 @@
 /deps/src/zstd/
 /deps/src/brotli/
 /deps/src/musl/
+/deps/src/termshark/
 /toolchain/meson/
 
 # Wireshark source (cloned by setup.sh)
@@ -41,3 +42,5 @@
 
 # Claude Code local settings (machine-specific, not for sharing)
 .claude/settings.local.json
+dumpcap
+out
