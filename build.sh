@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Tobias Faller
+# SPDX-License-Identifier: Apache-2.0
+#
 # build.sh — Configure and build TShark from an already-prepared workspace.
 #
 # Prerequisite: setup.sh has been run at least once (all static deps built,
@@ -73,9 +76,10 @@ package_output() {
         echo "WARNING: $readme not found — package will not include README.md" >&2
     fi
 
-    # Dependency license list (compliance — ships with the binaries)
+    # Dependency license list + project (Apache-2.0) license — ship with binaries
     [ -f "/workspace/DEPENDENCY_LICENSES.md" ] && \
         cp "/workspace/DEPENDENCY_LICENSES.md" "$pkgdir/DEPENDENCY_LICENSES.md" || true
+    [ -f "/workspace/LICENSE" ] && cp "/workspace/LICENSE" "$pkgdir/LICENSE" || true
 
     tar -czf "$archive" -C "$outdir" "$pkgname"
     rm -rf "$pkgdir"

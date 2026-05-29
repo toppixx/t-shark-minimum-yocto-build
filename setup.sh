@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Tobias Faller
+# SPDX-License-Identifier: Apache-2.0
+#
 # setup.sh — Build TShark 4.2.x (static, aarch64) with EtherCAT dissector support
 # Tested inside the tshark-builder devcontainer (debian:bookworm, aarch64 host).
 # Network access limited to GitHub IP ranges.
@@ -58,9 +61,10 @@ package_output() {
         echo "WARNING: $readme not found — package will not include README.md" >&2
     fi
 
-    # Dependency license list (compliance — ships with the binaries)
+    # Dependency license list + project (Apache-2.0) license — ship with binaries
     [ -f "$WS/DEPENDENCY_LICENSES.md" ] && \
         cp "$WS/DEPENDENCY_LICENSES.md" "$pkgdir/DEPENDENCY_LICENSES.md" || true
+    [ -f "$WS/LICENSE" ] && cp "$WS/LICENSE" "$pkgdir/LICENSE" || true
 
     # Pack
     tar -czf "$archive" -C "$outdir" "$pkgname"

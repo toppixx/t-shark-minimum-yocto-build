@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Tobias Faller
+# SPDX-License-Identifier: Apache-2.0
+#
 # uninstall-termshark.sh — remove tshark + dumpcap + termshark from a target
 #
 # Runs ON THE TARGET device. POSIX sh — works under busybox ash.

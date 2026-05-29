@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Tobias Faller
+# SPDX-License-Identifier: Apache-2.0
+#
 # upgrade-tshark-by-termshark.sh
 #
 # Builds termshark (terminal UI for tshark) for aarch64 and creates a
@@ -194,6 +197,7 @@ cp "$BINARY_DIR/BUILD_INFO.txt"   "$PKGDIR/"
 [ -f "$WS/README.md" ]              && cp "$WS/README.md"              "$PKGDIR/README.md"              || true
 [ -f "$WS/TERMSHARK.md" ]           && cp "$WS/TERMSHARK.md"           "$PKGDIR/TERMSHARK.md"           || true
 [ -f "$WS/DEPENDENCY_LICENSES.md" ] && cp "$WS/DEPENDENCY_LICENSES.md" "$PKGDIR/DEPENDENCY_LICENSES.md" || true
+[ -f "$WS/LICENSE" ]                && cp "$WS/LICENSE"                "$PKGDIR/LICENSE"                || true
 
 # Install / uninstall helper scripts (run on the target)
 for helper in setup-termshark.sh uninstall-termshark.sh; do

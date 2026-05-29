@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Tobias Faller
+# SPDX-License-Identifier: Apache-2.0
+#
 # setup-termshark.sh — install tshark + dumpcap + termshark on an aarch64 target
 #
 # Runs ON THE TARGET device (not the build host). POSIX sh — works under

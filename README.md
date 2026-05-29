@@ -458,4 +458,44 @@ ecateoe                       Ethernet over EtherCAT (EoE)
 
 ---
 
+## License
+
+The **build tooling** in this project (the `setup.sh` / `build.sh` /
+`upgrade-tshark-by-termshark.sh` / `setup-termshark.sh` /
+`uninstall-termshark.sh` scripts, Dockerfile, CI config, and documentation) is
+licensed under the **Apache License 2.0** — see the bundled `LICENSE` file.
+
+The **compiled binaries** carry the licenses of their upstream sources, which
+are independent of the build-tooling license:
+
+| Binary | Effective license |
+|--------|-------------------|
+| `tshark`, `dumpcap` | **GPL-2.0-or-later** (Wireshark) |
+| `termshark` | **MIT** (invokes tshark; does not link it) |
+
+### Bundled dependency licenses
+
+The binaries statically link the following components. Full details, versions,
+and compliance obligations are in **`DEPENDENCY_LICENSES.md`** (bundled in the
+package).
+
+| License | Components |
+|---------|------------|
+| **GPL-2.0-or-later** | Wireshark (tshark, dumpcap, EtherCAT dissectors) |
+| **LGPL-2.1** | GLib, libgcrypt, libgpg-error, libnl, glibc (static), gospake2 (termshark) |
+| **Apache-2.0** | OpenSSL, gdamore/tcell, and other Go modules |
+| **MPL-2.0** | HashiCorp libraries, antchfx/xmlquery (termshark) |
+| **BSD-2/3-Clause** | libpcap, lz4, zstd, PCRE2, golang.org/x/* |
+| **MIT** | libffi, c-ares, brotli, termshark, most Go modules |
+| **Zlib** | zlib |
+| **ISC** | one Go module |
+
+**Compliance summary:** the GPL-2.0 binaries require the corresponding source
+to be available (the pinned sources + `setup.sh` satisfy this); statically
+linked LGPL-2.1 libraries require that relinking be possible (this repository
+provides that). See `DEPENDENCY_LICENSES.md` for the full obligations.
+
+---
+
 *Built with Wireshark 4.2.14 · aarch64 · statically linked · EtherCAT built-in*
+*Build tooling licensed Apache-2.0; binaries under their upstream licenses.*
