@@ -1,0 +1,36 @@
+{
+  "name": "TShark ARM64 Builder",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "TZ": "${localEnv:TZ:Europe/Berlin}",
+      "CLAUDE_CODE_VERSION": "latest"
+    }
+  },
+  "remoteUser": "node",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "ms-vscode.cmake-tools",
+        "twxs.cmake"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "mounts": [
+    "source=tshark-builder-history-${devcontainerId},target=/commandhistory,type=volume",
+    "source=tshark-builder-config-${devcontainerId},target=/home/node/.claude,type=volume",
+    "source=tshark-build-output,target=/build/output,type=volume"
+  ],
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspace",
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude",
+    "NODE_OPTIONS": "--max-old-space-size=4096"
+  },
+  "postCreateCommand": "echo 'Ready. Claude Code can now drive the tshark build. Output goes to /build/output'",
+  "forwardPorts": []
+}

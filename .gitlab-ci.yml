@@ -1,0 +1,155 @@
+# .gitlab-ci.yml
+# Builds a fully static TShark binary for aarch64 with built-in EtherCAT
+# dissector support.
+#
+# Runner requirements (x86_64 host with QEMU emulation):
+#   • Docker executor
+#   • Privileged mode (for the register-qemu job, or pre-register QEMU once
+#     on the host with:  docker run --rm --privileged multiarch/qemu-user-static --reset -p yes)
+#   • ~10 GB disk space for deps cache + build artefacts
+#
+# First-run tip:
+#   Set the CI variable REGISTER_QEMU=true on the first pipeline run to let
+#   GitLab register QEMU binfmt on the runner host.  Subsequent runs can
+#   leave it unset — binfmt registration persists across jobs.
+
+# ---------------------------------------------------------------------------
+# Global settings
+# ---------------------------------------------------------------------------
+stages:
+  - qemu      # optional: register arm64 QEMU binfmt on the runner host
+  - deps      # build all static dependency libraries (result is cached)
+  - build     # compile tshark, verify, and publish the artefact
+
+variables:
+  # arm64 Debian image — runs transparently under QEMU on x86_64 hosts
+  BUILD_IMAGE: "arm64v8/debian:bookworm"
+
+  # Must match the version pinned in setup.sh
+  WIRESHARK_VERSION: "v4.2.14"
+
+  # Cache namespace — bump this string to force a full dep rebuild
+  CACHE_PREFIX: "tshark-deps-v1"
+
+  # How long to keep the published tshark binary
+  ARTIFACT_EXPIRE: "30 days"
+
+# ---------------------------------------------------------------------------
+# Anchors
+# ---------------------------------------------------------------------------
+
+# Wire /workspace → $CI_PROJECT_DIR so setup.sh / build.sh find their paths.
+# Also ensure sudo is available (Docker containers run as root without it).
+.init-workspace:
+  before_script: &init-workspace
+    - |
+      command -v sudo >/dev/null 2>&1 \
+        || apt-get install -y --no-install-recommends sudo -qq 2>/dev/null
+      mkdir -p /workspace /build/output
+      ln -sfn "$CI_PROJECT_DIR" /workspace
+
+# Shared cache definition — keyed on the content of setup.sh so the cache
+# is automatically invalidated whenever the dep build script changes.
+.deps-cache:
+  cache: &deps-cache
+    key:
+      prefix: "$CACHE_PREFIX"
+      files:
+        - setup.sh
+    paths:
+      - deps/install/
+      - toolchain/meson/
+
+# ---------------------------------------------------------------------------
+# Stage: qemu
+# Register arm64 QEMU binfmt_misc on the runner host.
+# Only runs when CI variable REGISTER_QEMU is set to "true".
+# Requires: privileged Docker executor with Docker-in-Docker service.
+# ---------------------------------------------------------------------------
+register-qemu:
+  stage: qemu
+  image: docker:24
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+  script:
+    - docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+    - docker run --rm arm64v8/debian:bookworm uname -m   # verify arm64 works
+  rules:
+    - if: '$REGISTER_QEMU == "true"'
+
+# ---------------------------------------------------------------------------
+# Stage: deps
+# Build all static dep libraries using setup.sh.
+# On cache hit the job exits immediately; on miss it runs the full build
+# (~20–40 min) and uploads the result to the cache for future pipelines.
+# ---------------------------------------------------------------------------
+build-deps:
+  stage: deps
+  image: $BUILD_IMAGE
+  before_script: *init-workspace
+  script:
+    - |
+      echo "=== Checking dep cache ==="
+      if [ -f deps/install/lib/libglib-2.0.a ] \
+        && [ -f deps/install/lib/libpcap.a ] \
+        && [ -f deps/install/lib/libcombined-deps.a ]; then
+        echo "Cache warm — all dep libraries present, skipping dep build."
+        exit 0
+      fi
+      echo "Cache cold — building static dependencies (this will take a while)."
+      ./setup.sh
+  cache:
+    <<: *deps-cache
+    policy: pull-push   # read existing cache, write back after a dep build
+  rules:
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_MERGE_REQUEST_IID
+
+# ---------------------------------------------------------------------------
+# Stage: build
+# Compile tshark against the cached deps and publish it as an artefact.
+# ---------------------------------------------------------------------------
+build-tshark:
+  stage: build
+  image: $BUILD_IMAGE
+  needs:
+    - job: build-deps
+      artifacts: false
+  before_script: *init-workspace
+  script:
+    # Safety net: if the dep cache was not populated (e.g. first run with
+    # a parallel build-deps failure), run setup.sh before building.
+    - |
+      if [ ! -f deps/install/lib/libglib-2.0.a ]; then
+        echo "WARNING: dep cache missing — running setup.sh as fallback."
+        ./setup.sh
+      fi
+    - ./build.sh
+
+    # Collect artefacts into the project tree so GitLab can publish them.
+    - mkdir -p artifacts
+    - cp /build/output/tshark          artifacts/tshark
+    - cp /build/output/tshark.sha256   artifacts/tshark.sha256
+    - cp /build/output/BUILD_INFO.txt  artifacts/BUILD_INFO.txt
+    - |
+      echo "=== Artefact summary ==="
+      file artifacts/tshark
+      cat artifacts/tshark.sha256
+      du -sh artifacts/tshark
+  cache:
+    <<: *deps-cache
+    policy: pull    # deps are read-only in the build stage; deps stage owns writes
+  artifacts:
+    name: "tshark-aarch64-${CI_COMMIT_SHORT_SHA}"
+    paths:
+      - artifacts/tshark
+      - artifacts/tshark.sha256
+      - artifacts/BUILD_INFO.txt
+    expire_in: $ARTIFACT_EXPIRE
+    when: on_success
+  rules:
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_MERGE_REQUEST_IID
