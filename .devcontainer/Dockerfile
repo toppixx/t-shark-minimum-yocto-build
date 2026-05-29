@@ -2,7 +2,7 @@
 # To refresh: docker pull debian:bookworm --platform linux/arm64 \
 #             && docker inspect debian:bookworm --format '{{index .RepoDigests 0}}'
 # Last verified: Debian 12.14 (bookworm), 2026-05-29
-FROM debian:bookworm
+FROM --platform=linux/arm64 debian:bookworm
 
 ARG TZ=Europe/Berlin
 ENV TZ="$TZ"

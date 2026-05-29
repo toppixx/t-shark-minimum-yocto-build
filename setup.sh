@@ -3,6 +3,9 @@
 # Tested inside the tshark-builder devcontainer (debian:bookworm, aarch64 host).
 # Network access limited to GitHub IP ranges.
 set -euo pipefail
+# Shell wrappers injected by tooling (e.g. Claude Code's grep hook) reference
+# ZSH_VERSION; define it as empty so set -u doesn't abort those checks in bash.
+: "${ZSH_VERSION:=}"
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -666,7 +669,10 @@ readelf -d "$TSHARK_BIN" | grep NEEDED \
     && { echo "ERROR: binary has shared library dependencies"; exit 1; } \
     || echo "PASS: statically linked"
 
-nm "$TSHARK_BIN" | grep -q "proto_register_ecat" \
+# grep -q exits on first match; with set -o pipefail nm's resulting SIGPIPE
+# (exit 141) would propagate as a failure even though grep succeeded.
+# Wrapping nm in { || true; } absorbs the SIGPIPE exit code.
+{ nm "$TSHARK_BIN" || true; } | grep -q "proto_register_ecat" \
     && echo "PASS: EtherCAT dissector symbols present" \
     || { echo "ERROR: EtherCAT symbols missing"; exit 1; }
 
