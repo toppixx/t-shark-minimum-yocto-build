@@ -23,7 +23,7 @@ echo ">>> Phase 0: prerequisites"
 sudo apt-get update -qq
 sudo apt-get install -y \
     gcc g++ binutils \
-    aarch64-linux-gnu-gcc aarch64-linux-gnu-g++ binutils-aarch64-linux-gnu \
+    binutils-aarch64-linux-gnu \
     cmake ninja-build \
     python3 git perl \
     flex bison \
@@ -75,10 +75,38 @@ ENVEOF
 source "$WS/toolchain/env.sh"
 
 # ---------------------------------------------------------------------------
-# Helper: clone a GitHub repo if the destination doesn't already exist
+# H-3: Pinned dependency commit SHAs.
+# Every dependency is locked to the exact commit used in the verified build.
+# If a clone's HEAD does not match the pinned SHA, setup aborts — this
+# catches upstream tag rewrites or unexpected branch changes.
+# To upgrade a dependency: change the branch/tag AND update the SHA here.
+# ---------------------------------------------------------------------------
+declare -A DEP_SHAS=(
+    [zlib]="f9dd6009be3ed32415edf1e89d1bc38380ecb95d"
+    [libffi]="c5abbdad2f930f806791942776ccd45beeff1613"
+    [pcre2]="ff92e0b9cea5b5ae3af12ba930d03556684f098b"
+    [glib]="d40f72e98e4734ba826ba9a278814530720ba760"
+    [libgpg-error]="9b108b54d1229fb1fb30eebe2f5ae958f4c93b2c"
+    [libgcrypt]="92a2b41e94c1b63700b8b01ae11ccbeb0ae4a2a8"
+    [openssl]="0c1194718301808d48db78355c03c6f5e884e4a3"
+    [libpcap]="6b5de1e5f07a4fea6672caa2d34935c3da24a8f2"
+    [c-ares]="c93e50f3ebc0373fe57677523ec960f6c1cb0e15"
+    [lz4]="64e81c59de3971089c9a524db3eca174e1bbad49"
+    [zstd]="5233c58e6ca0b1c4c6b353ad79649191ed195bdc"
+    [brotli]="6312ee24cebbe329cee30fe12087469e3014442b"
+    [wireshark]="9d81a981d05cd0d2e764871c5b4b7fcdb694182f"
+    [meson]=""   # meson cloned from HEAD; no pinning (pure Python, low risk)
+)
+
+# ---------------------------------------------------------------------------
+# Helper: clone a GitHub repo and verify the HEAD matches the pinned SHA
 # ---------------------------------------------------------------------------
 clone_if_missing() {
     local url="$1" dest="$2" branch="${3:-}"
+    local name
+    name=$(basename "$dest")
+    local expected_sha="${DEP_SHAS[$name]:-}"
+
     if [ ! -d "$dest/.git" ]; then
         if [ -n "$branch" ]; then
             git clone --depth=1 --branch "$branch" "$url" "$dest"
@@ -86,25 +114,46 @@ clone_if_missing() {
             git clone --depth=1 "$url" "$dest"
         fi
     fi
+
+    # Verify pinned SHA when one is defined for this dependency
+    if [ -n "$expected_sha" ]; then
+        local actual_sha
+        actual_sha=$(git -C "$dest" rev-parse HEAD)
+        if [ "$actual_sha" != "$expected_sha" ]; then
+            echo "ERROR: SHA mismatch for $name!" >&2
+            echo "  Expected: $expected_sha" >&2
+            echo "  Got:      $actual_sha" >&2
+            echo "  If this is an intentional upgrade, update DEP_SHAS in setup.sh." >&2
+            exit 1
+        fi
+        echo "    $name SHA verified: ${expected_sha:0:12}…"
+    fi
 }
 
 # ---------------------------------------------------------------------------
 # Phase 1 — Clone all dependency sources (in parallel)
 # ---------------------------------------------------------------------------
 echo ">>> Phase 1: clone dependency sources"
-clone_if_missing https://github.com/madler/zlib.git             "$WS/deps/src/zlib"     &
-clone_if_missing https://github.com/libffi/libffi.git           "$WS/deps/src/libffi"   &
-clone_if_missing https://github.com/PCRE2Project/pcre2.git      "$WS/deps/src/pcre2"    &
-clone_if_missing https://github.com/GNOME/glib.git              "$WS/deps/src/glib" "2.78.6" &
-clone_if_missing https://github.com/gpg/libgpg-error.git        "$WS/deps/src/libgpg-error" &
-clone_if_missing https://github.com/gpg/libgcrypt.git           "$WS/deps/src/libgcrypt"    &
-clone_if_missing https://github.com/openssl/openssl.git         "$WS/deps/src/openssl"      &
-clone_if_missing https://github.com/the-tcpdump-group/libpcap.git "$WS/deps/src/libpcap"   &
-clone_if_missing https://github.com/c-ares/c-ares.git           "$WS/deps/src/c-ares"   &
-clone_if_missing https://github.com/lz4/lz4.git                 "$WS/deps/src/lz4"      &
-clone_if_missing https://github.com/facebook/zstd.git           "$WS/deps/src/zstd"     &
-clone_if_missing https://github.com/google/brotli.git           "$WS/deps/src/brotli"   &
-wait
+# M-8: Track each background PID so clone failures abort the build instead
+# of being silently swallowed by plain `wait`.
+CLONE_PIDS=()
+clone_if_missing https://github.com/madler/zlib.git             "$WS/deps/src/zlib"     & CLONE_PIDS+=($!)
+clone_if_missing https://github.com/libffi/libffi.git           "$WS/deps/src/libffi"   & CLONE_PIDS+=($!)
+clone_if_missing https://github.com/PCRE2Project/pcre2.git      "$WS/deps/src/pcre2"    & CLONE_PIDS+=($!)
+clone_if_missing https://github.com/GNOME/glib.git              "$WS/deps/src/glib" "2.78.6" & CLONE_PIDS+=($!)
+clone_if_missing https://github.com/gpg/libgpg-error.git        "$WS/deps/src/libgpg-error" & CLONE_PIDS+=($!)
+clone_if_missing https://github.com/gpg/libgcrypt.git           "$WS/deps/src/libgcrypt"    & CLONE_PIDS+=($!)
+clone_if_missing https://github.com/openssl/openssl.git         "$WS/deps/src/openssl"      & CLONE_PIDS+=($!)
+clone_if_missing https://github.com/the-tcpdump-group/libpcap.git "$WS/deps/src/libpcap"   & CLONE_PIDS+=($!)
+clone_if_missing https://github.com/c-ares/c-ares.git           "$WS/deps/src/c-ares"       & CLONE_PIDS+=($!)
+clone_if_missing https://github.com/lz4/lz4.git                 "$WS/deps/src/lz4"          & CLONE_PIDS+=($!)
+clone_if_missing https://github.com/facebook/zstd.git           "$WS/deps/src/zstd"         & CLONE_PIDS+=($!)
+clone_if_missing https://github.com/google/brotli.git           "$WS/deps/src/brotli"       & CLONE_PIDS+=($!)
+CLONE_FAIL=0
+for pid in "${CLONE_PIDS[@]}"; do
+    wait "$pid" || { echo "ERROR: a clone job failed (PID $pid)" >&2; CLONE_FAIL=1; }
+done
+[ "$CLONE_FAIL" -eq 0 ] || exit 1
 echo "All dependency sources ready."
 
 # ---------------------------------------------------------------------------
@@ -196,7 +245,10 @@ fi
 echo "    libglib-2.0.a: OK"
 
 # Update env.sh with glibconfig.h private include path
-GLIB_PRIV_INC=$(find "$DEPINST/lib" -name "glibconfig.h" -exec dirname {} \; | head -1)
+_glib_hits=$(find "$DEPINST/lib" -name "glibconfig.h" -exec dirname {} \; )
+[ -n "$_glib_hits" ] || { echo "ERROR: glibconfig.h not found under $DEPINST/lib" >&2; exit 1; }
+[ "$(echo "$_glib_hits" | wc -l)" -eq 1 ] || { echo "ERROR: multiple glibconfig.h found — ambiguous: $_glib_hits" >&2; exit 1; }
+GLIB_PRIV_INC="$_glib_hits"
 cat > "$WS/toolchain/env.sh" << ENVEOF
 export DEPINST=/workspace/deps/install
 export CC=gcc
@@ -229,10 +281,12 @@ if [ ! -f "$DEPINST/lib/libgpg-error.a" ]; then
         --disable-languages \
         --disable-tests \
         CC="$CC" CFLAGS="$CFLAGS" AR="$AR" RANLIB="$RANLIB"
-    # The doc/ subdir may fail (missing texinfo) — ignore, library still builds.
-    make -j"$(nproc)" || true
-    make install || true
-    # Verify the library itself was installed despite any doc errors
+    # M-6: Build only the library subdirectories explicitly to avoid the
+    # doc/ failure (missing texinfo) masking a real library build error.
+    make -j"$(nproc)" -C src
+    make -j"$(nproc)" -C lang
+    make install -C src
+    make install -C lang
     test -f "$DEPINST/lib/libgpg-error.a"
 fi
 echo "    libgpg-error.a: OK"
@@ -260,9 +314,9 @@ echo ">>> Build OpenSSL"
 source "$WS/toolchain/env.sh"
 if [ ! -f "$DEPINST/lib/libssl.a" ]; then
     cd "$WS/deps/src/openssl"
-    # Use the latest available tag in the source; fall back to HEAD if no tag found.
-    OPENSSL_TAG=$(git tag | grep '^openssl-3\.' | sort -V | tail -1)
-    [ -n "$OPENSSL_TAG" ] && git checkout "$OPENSSL_TAG" || true
+    # M-7: SHA is pinned via DEP_SHAS above (verified in clone_if_missing).
+    # HEAD is used directly; do not checkout a different tag here to avoid
+    # diverging from the verified SHA.
     ./Configure \
         linux-aarch64 \
         --prefix="$DEPINST" \
@@ -378,7 +432,9 @@ echo ">>> Build combined deps archive"
 source "$WS/toolchain/env.sh"
 MULTIARCH="$DEPINST/lib/aarch64-linux-gnu"
 
+# L-2: Register cleanup so the temp file is removed even if the script exits early.
 ar_script=$(mktemp)
+trap 'rm -f "$ar_script"' EXIT
 cat > "$ar_script" << AREOF
 CREATE ${DEPINST}/lib/libcombined-deps.a
 ADDLIB ${DEPINST}/lib/libglib-2.0.a
@@ -397,7 +453,9 @@ SAVE
 END
 AREOF
 ar -M < "$ar_script"
+# trap handles cleanup; explicit rm is kept for clarity but is now redundant
 rm -f "$ar_script"
+trap - EXIT
 echo "    libcombined-deps.a: $(du -sh "$DEPINST/lib/libcombined-deps.a" | cut -f1)"
 
 # ---------------------------------------------------------------------------
@@ -439,10 +497,14 @@ if ! grep -q "packet-ams.c" "$DISSECTORS/CMakeLists.txt"; then
     sed -i 's|set(DISSECTOR_SRC\n|set(DISSECTOR_SRC\n\t${CMAKE_CURRENT_SOURCE_DIR}/packet-ams.c\n|' \
         "$DISSECTORS/CMakeLists.txt" 2>/dev/null || true
 
+    # M-9: Pass WS via argument so the script works regardless of cwd.
     # sed multiline is unreliable across platforms; use python3 instead.
-    python3 - << 'PYEOF'
-import re, pathlib
-p = pathlib.Path("/workspace/wireshark/epan/dissectors/CMakeLists.txt")
+    python3 - "$WS" << 'PYEOF'
+import sys, pathlib
+ws = sys.argv[1]
+p = pathlib.Path(ws) / "wireshark/epan/dissectors/CMakeLists.txt"
+if not p.exists():
+    print(f"ERROR: {p} not found", file=sys.stderr); sys.exit(1)
 txt = p.read_text()
 marker = "set(DISSECTOR_SRC\n"
 insert = (
@@ -469,7 +531,10 @@ fi
 # ---------------------------------------------------------------------------
 echo ">>> Generate CMake cache file"
 source "$WS/toolchain/env.sh"
-GLIB_PRIV_INC=$(find "$DEPINST/lib" -name "glibconfig.h" -exec dirname {} \; | head -1)
+_glib_hits=$(find "$DEPINST/lib" -name "glibconfig.h" -exec dirname {} \; )
+[ -n "$_glib_hits" ] || { echo "ERROR: glibconfig.h not found under $DEPINST/lib" >&2; exit 1; }
+[ "$(echo "$_glib_hits" | wc -l)" -eq 1 ] || { echo "ERROR: multiple glibconfig.h found — ambiguous: $_glib_hits" >&2; exit 1; }
+GLIB_PRIV_INC="$_glib_hits"
 
 cat > "$WS/toolchain/wireshark-cache.cmake" << CACHEEOF
 # Auto-generated by setup.sh — static dep locations for Wireshark CMake.
@@ -526,7 +591,10 @@ CACHEEOF
 # ---------------------------------------------------------------------------
 echo ">>> Configure CMake"
 source "$WS/toolchain/env.sh"
-GLIB_PRIV_INC=$(find "$DEPINST/lib" -name "glibconfig.h" -exec dirname {} \; | head -1)
+_glib_hits=$(find "$DEPINST/lib" -name "glibconfig.h" -exec dirname {} \; )
+[ -n "$_glib_hits" ] || { echo "ERROR: glibconfig.h not found under $DEPINST/lib" >&2; exit 1; }
+[ "$(echo "$_glib_hits" | wc -l)" -eq 1 ] || { echo "ERROR: multiple glibconfig.h found — ambiguous: $_glib_hits" >&2; exit 1; }
+GLIB_PRIV_INC="$_glib_hits"
 
 rm -rf "$WS/build"
 cmake -G Ninja \

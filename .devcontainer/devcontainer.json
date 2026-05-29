@@ -4,7 +4,7 @@
     "dockerfile": "Dockerfile",
     "args": {
       "TZ": "${localEnv:TZ:Europe/Berlin}",
-      "CLAUDE_CODE_VERSION": "latest"
+      "CLAUDE_CODE_VERSION": "2.1.156"
     }
   },
   "remoteUser": "node",
@@ -23,7 +23,7 @@
   "mounts": [
     "source=tshark-builder-history-${devcontainerId},target=/commandhistory,type=volume",
     "source=tshark-builder-config-${devcontainerId},target=/home/node/.claude,type=volume",
-    "source=tshark-build-output,target=/build/output,type=volume"
+    "source=tshark-build-output-${devcontainerId},target=/build/output,type=volume"
   ],
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",

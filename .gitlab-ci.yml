@@ -22,14 +22,21 @@ stages:
   - build     # compile tshark, verify, and publish the artefact
 
 variables:
-  # arm64 Debian image — runs transparently under QEMU on x86_64 hosts
+  # M-10: arm64 Debian image — runs transparently under QEMU on x86_64 hosts.
+  # Pin to a digest to prevent silent tag updates. To refresh:
+  #   docker pull arm64v8/debian:bookworm \
+  #     && docker inspect arm64v8/debian:bookworm --format '{{index .RepoDigests 0}}'
+  # Last verified: Debian 12.14 (bookworm), 2026-05-29
   BUILD_IMAGE: "arm64v8/debian:bookworm"
 
   # Must match the version pinned in setup.sh
   WIRESHARK_VERSION: "v4.2.14"
 
-  # Cache namespace — bump this string to force a full dep rebuild
-  CACHE_PREFIX: "tshark-deps-v1"
+  # L-5: Cache namespace includes dep version epoch so updating any pinned
+  # SHA in setup.sh without bumping this string still reuses a stale cache.
+  # Bump CACHE_EPOCH whenever DEP_SHAS in setup.sh are updated.
+  CACHE_EPOCH: "1"
+  CACHE_PREFIX: "tshark-deps-v${CACHE_EPOCH}"
 
   # How long to keep the published tshark binary
   ARTIFACT_EXPIRE: "30 days"
@@ -137,8 +144,19 @@ build-tshark:
     - |
       echo "=== Artefact summary ==="
       file artifacts/tshark
-      cat artifacts/tshark.sha256
       du -sh artifacts/tshark
+    # L-4: Verify the artifact SHA256 matches what build.sh recorded.
+    # This catches silent corruption between /build/output and artifacts/.
+    - |
+      RECORDED=$(awk '{print $1}' artifacts/tshark.sha256)
+      ACTUAL=$(sha256sum artifacts/tshark | awk '{print $1}')
+      if [ "$RECORDED" != "$ACTUAL" ]; then
+        echo "ERROR: artifact SHA256 mismatch!"
+        echo "  Recorded: $RECORDED"
+        echo "  Actual:   $ACTUAL"
+        exit 1
+      fi
+      echo "SHA256 verified: $ACTUAL"
   cache:
     <<: *deps-cache
     policy: pull    # deps are read-only in the build stage; deps stage owns writes
