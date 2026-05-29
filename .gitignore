@@ -36,8 +36,10 @@
 # Build output copied into workspace for local inspection
 /tshark
 /dumpcap
+/termshark
 /tshark.sha256
 /dumpcap.sha256
+/termshark.sha256
 /tshark-aarch64-*.tar.gz
 /tshark-aarch64-*.sha256
 
