@@ -58,6 +58,10 @@ package_output() {
         echo "WARNING: $readme not found — package will not include README.md" >&2
     fi
 
+    # Dependency license list (compliance — ships with the binaries)
+    [ -f "$WS/DEPENDENCY_LICENSES.md" ] && \
+        cp "$WS/DEPENDENCY_LICENSES.md" "$pkgdir/DEPENDENCY_LICENSES.md" || true
+
     # Pack
     tar -czf "$archive" -C "$outdir" "$pkgname"
     rm -rf "$pkgdir"

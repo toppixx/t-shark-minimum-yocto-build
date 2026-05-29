@@ -190,9 +190,10 @@ cp "$BINARY_DIR/dumpcap.sha256"   "$PKGDIR/"
 cp "$BINARY_DIR/termshark.sha256" "$PKGDIR/"
 cp "$BINARY_DIR/BUILD_INFO.txt"   "$PKGDIR/"
 
-# Documentation — tshark guide + termshark guide
-[ -f "$WS/README.md" ]    && cp "$WS/README.md"    "$PKGDIR/README.md"    || true
-[ -f "$WS/TERMSHARK.md" ] && cp "$WS/TERMSHARK.md" "$PKGDIR/TERMSHARK.md" || true
+# Documentation — tshark guide + termshark guide + dependency licenses
+[ -f "$WS/README.md" ]              && cp "$WS/README.md"              "$PKGDIR/README.md"              || true
+[ -f "$WS/TERMSHARK.md" ]           && cp "$WS/TERMSHARK.md"           "$PKGDIR/TERMSHARK.md"           || true
+[ -f "$WS/DEPENDENCY_LICENSES.md" ] && cp "$WS/DEPENDENCY_LICENSES.md" "$PKGDIR/DEPENDENCY_LICENSES.md" || true
 
 # Install / uninstall helper scripts (run on the target)
 for helper in setup-termshark.sh uninstall-termshark.sh; do
